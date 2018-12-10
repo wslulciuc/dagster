@@ -139,12 +139,28 @@ jobs:
           command: |
             sudo pip install tox
 
+      - restore_cache:
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "requirements.txt" }}
+
       - run:
           name: Run Dagster Tests
           command: |
             pushd python_modules/dagit
             tox -e $TOXENV
             popd
+
+      - save_cache:
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "requirements.txt" }}
+          paths:
+            - ./.tox/py36/lib/python3.6/site-packages
+
+      - store_artifacts:
+          path: test-reports
+          destination: test-reports
+
+      - store_artifacts:
+          path: python_modules/dagster/.coverage
+          destination: .coverage
 
       - run:
           command: |
