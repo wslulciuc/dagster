@@ -141,7 +141,7 @@ jobs:
             sudo pip install tox
 
       - restore_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "requirements.txt" }}
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/dagster/requirements.txt" }}
 
       - run:
           name: Run Dagster Tests
@@ -151,7 +151,7 @@ jobs:
             popd
 
       - save_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "requirements.txt" }}
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/dagster/requirements.txt" }}
           paths:
             - ./.tox/{{ .Environment.TOXENV }}/lib/{{ .Environment.PYTHON_VERSION}}/site-packages
 
