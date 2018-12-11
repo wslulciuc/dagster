@@ -129,7 +129,6 @@ jobs:
       - image: circleci/python:3.6.6
     environment:
       TOXENV: py36
-      PYTHON_VERSION: python3.6
     working_directory: ~/repo
 
     steps:
@@ -141,7 +140,7 @@ jobs:
             sudo pip install tox
 
       - restore_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/dagster/requirements.txt" }}
+          key: dagster-python-py36-{{ checksum "python_modules/dagster/requirements.txt" }}
 
       - run:
           name: Run Dagster Tests
@@ -151,9 +150,9 @@ jobs:
             popd
 
       - save_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/dagster/requirements.txt" }}
+          key: dagster-python-py36-{{ checksum "python_modules/dagster/requirements.txt" }}
           paths:
-            - ./.tox/{{ .Environment.TOXENV }}/lib/{{ .Environment.PYTHON_VERSION}}/site-packages
+            - ./.tox/py36/lib/python3.6/site-packages
 
       - store_artifacts:
           path: test-reports
@@ -263,7 +262,6 @@ jobs:
       - image: circleci/python:3.5.6
     environment:
       TOXENV: py35
-      PYTHON_VERSION: python3.5
 
   dagit-py27:
     <<: *dagit-template
@@ -292,7 +290,6 @@ jobs:
       - image: circleci/python:2.7.15
     environment:
       TOXENV: py27
-      PYTHON_VERSION: python2.7
 
   dagster-aux-modules-py37:
     <<: *dagster-aux-modules-template
@@ -360,7 +357,6 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py36
-      PYTHON_VERSION: python3.6
 
     steps:
       - checkout
@@ -371,7 +367,7 @@ jobs:
             sudo pip install tox
 
       - restore_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/airline-demo/requirements.txt" }}
+          key: airline-demo-py36-{{ checksum "python_modules/airline-demo/requirements.txt" }}
 
       - run:
           name: Run airline-demo Tests
@@ -380,9 +376,9 @@ jobs:
             tox -e $TOXENV
 
       - save_cache:
-          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/airline-demo/requirements.txt" }}
+          key: airline-demo-py36-{{ checksum "python_modules/airline-demo/requirements.txt" }}
           paths:
-            - ./.tox/{{ .Environment.TOXENV }}/lib/{{ .Environment.PYTHON_VERSION}}/site-packages
+            - ./.tox/py36/lib/python3.6/site-packages
 
       - store_artifacts:
           path: test-reports
@@ -426,7 +422,6 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py35
-      PYTHON_VERSION: python3.5
 
   airline-demo-py27:
     <<: *airline-demo-template
@@ -442,7 +437,6 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py27
-      PYTHON_VERSION: python2.7
 
   coverage:
     docker:
