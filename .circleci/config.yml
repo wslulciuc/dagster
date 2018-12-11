@@ -129,6 +129,7 @@ jobs:
       - image: circleci/python:3.6.6
     environment:
       TOXENV: py36
+      PYTHON_VERSION: python3.6
     working_directory: ~/repo
 
     steps:
@@ -152,7 +153,7 @@ jobs:
       - save_cache:
           key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "requirements.txt" }}
           paths:
-            - ./.tox/py36/lib/python3.6/site-packages
+            - ./.tox/{{ .Environment.TOXENV }}/lib/{{ .Environment.PYTHON_VERSION}}/site-packages
 
       - store_artifacts:
           path: test-reports
@@ -262,6 +263,7 @@ jobs:
       - image: circleci/python:3.5.6
     environment:
       TOXENV: py35
+      PYTHON_VERSION: python3.5
 
   dagit-py27:
     <<: *dagit-template
@@ -290,6 +292,7 @@ jobs:
       - image: circleci/python:2.7.15
     environment:
       TOXENV: py27
+      PYTHON_VERSION: python2.7
 
   dagster-aux-modules-py37:
     <<: *dagster-aux-modules-template
