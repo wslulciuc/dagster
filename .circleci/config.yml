@@ -152,7 +152,7 @@ jobs:
       - save_cache:
           key: dagster-python-py36-{{ checksum "python_modules/dagster/requirements.txt" }}
           paths:
-            - ./.tox/py36/lib/python3.6/site-packages
+            - /python_modules/dagster/.tox/py36/lib/python3.6/site-packages
 
       - store_artifacts:
           path: test-reports
@@ -378,7 +378,7 @@ jobs:
       - save_cache:
           key: airline-demo-py36-{{ checksum "python_modules/airline-demo/requirements.txt" }}
           paths:
-            - ./.tox/py36/lib/python3.6/site-packages
+            - ./python_modules/airline-demo/.tox/py36/lib/python3.6/site-packages
 
       - store_artifacts:
           path: test-reports
