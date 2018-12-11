@@ -360,6 +360,7 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py36
+      PYTHON_VERSION: python3.6
 
     steps:
       - checkout
@@ -369,11 +370,23 @@ jobs:
           command: |
             sudo pip install tox
 
+      - restore_cache:
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/airline-demo/requirements.txt" }}
+
       - run:
           name: Run airline-demo Tests
           command: |
             cd python_modules/airline-demo
             tox -e $TOXENV
+
+      - save_cache:
+          key: dagster-python-{{ .Environment.TOXENV }}-{{ checksum "python_modules/airline-demo/requirements.txt" }}
+          paths:
+            - ./.tox/{{ .Environment.TOXENV }}/lib/{{ .Environment.PYTHON_VERSION}}/site-packages
+
+      - store_artifacts:
+          path: test-reports
+          destination: test-reports
 
       - run:
           command: mv python_modules/airline-demo/.coverage python_modules/airline-demo/.coverage.airline-demo.${CIRCLE_BUILD_NUM}
@@ -413,6 +426,7 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py35
+      PYTHON_VERSION: python3.5
 
   airline-demo-py27:
     <<: *airline-demo-template
@@ -428,6 +442,7 @@ jobs:
           POSTGRES_DB: test
     environment:
       TOXENV: py27
+      PYTHON_VERSION: python2.7
 
   coverage:
     docker:
