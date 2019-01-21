@@ -6,7 +6,7 @@ import pickle
 
 from collections import namedtuple
 
-from botocore.errors import ClientError
+from botocore.exceptions import ClientError
 
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
