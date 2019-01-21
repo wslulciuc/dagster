@@ -19,8 +19,15 @@ from dagster import (
     ReentrantInfo,
     String,
 )
-from dagster.core.execution import create_typed_environment, get_subset_pipeline, yield_context
+from dagster.core.execution import (
+    _process_step_results,
+    create_typed_environment,
+    get_subset_pipeline,
+    yield_context,
+)
 from dagster.core.execution_context import RuntimeExecutionContext
+from dagster.core.execution_plan.create import create_execution_plan_core
+from dagster.core.execution_plan.objects import ExecutionPlanInfo
 from dagster.core.types.evaluator import evaluate_config_value
 from dagster.core.system_config.types import (
     define_maybe_optional_selector_field,
@@ -29,8 +36,7 @@ from dagster.core.system_config.types import (
 )
 from dagster.utils import single_item
 
-from ..types import DagmaEngineConfig
-from .aws_lambda import Storage
+from .aws_lambda import LambdaEngine, Storage, LambdaEngineConfig
 from .config import (
     DEFAULT_PUT_OBJECT_ACL,
     DEFAULT_PUT_OBJECT_STORAGE_CLASS,
@@ -38,6 +44,7 @@ from .config import (
     VALID_S3_ACLS,
     VALID_STORAGE_CLASSES,
 )
+from .types import DagmaEngine, DagmaEngineConfig
 from .utils import format_str_options
 
 
@@ -169,13 +176,6 @@ class AirflowEngineConfig(namedtuple('_AirflowEngineConfig', ''), DagmaEngineCon
     pass
 
 
-class LambdaEngineConfig(
-    namedtuple('_LambdaEngineConfig', 'sessionmaker runtime_s3_bucket execution_s3_bucket storage'),
-    DagmaEngineConfig,
-):
-    pass
-
-
 def construct_engine_config(engine_config_value):
     engine, field = single_item(engine_config_value)
     if engine == 'airflow':
@@ -217,6 +217,7 @@ def construct_engine_config(engine_config_value):
         )
         storage = Storage(sessionmaker, execution_s3_bucket, **field['storage_config'])
         return LambdaEngineConfig(
+            aws_region=aws_region_name,
             sessionmaker=sessionmaker,
             runtime_s3_bucket=runtime_s3_bucket,
             execution_s3_bucket=execution_s3_bucket,
@@ -229,7 +230,7 @@ def construct_engine_config(engine_config_value):
         )
 
 
-class DagmaConfig(namedtuple('_DagmaConfig', 'engine requirements includes')):
+class DagmaConfig(namedtuple('_DagmaConfig', 'engine_config requirements includes')):
     def __new__(cls, engine=None, requirements=None, includes=None):
         check.opt_inst_param(engine, 'engine', DagmaEngineConfig)
         check.opt_list_param(requirements, 'requirements')
@@ -304,18 +305,71 @@ def create_typed_dagma_environment(
     )
 
 
+class AirflowEngine(DagmaEngine):
+    def __init__(self, engine_config):
+        check.inst_param(engine_config, 'engine_config', AirflowEngineConfig)
+
+        self.engine_config = engine_config
+
+
+def create_dagma_engine(dagma_environment):
+    check.inst_param(dagma_environment, 'dagma_environment', DagmaConfig)
+
+    if isinstance(dagma_environment.engine, LambdaEngineConfig):
+        return LambdaEngine(LambdaEngineConfig)
+    elif isinstance(dagma_environment.engine, AirflowEngineConfig):
+        return AirflowEngine(AirflowEngineConfig)
+    else:
+        check.failed("Shouldn't be here: only supported engine types are lambda and airflow")
+
+
 def _do_iterate_pipeline(
-    pipeline, environment, dagma_environment, reentrant_info, throw_on_error
+    context, pipeline, environment, dagma_engine, reentrant_info, throw_on_error
 ):
     check.inst(context, RuntimeExecutionContext)
-    pipeline_success = True:
+    pipeline_success = True
+    with context.value('pipeline', pipeline.display_name):
+        context.events.pipeline_start()
 
-# from dagster.core.execution import yield_context
-# def execute(pipeline, typed_environment, reentrant_info):
-#     with yield_context(pipeline, typed_environment, reentrant_info):
+        execution_plan = create_execution_plan_core(
+            ExecutionPlanInfo(context, pipeline, environment)
+        )
 
+        steps = list(execution_plan.topological_steps())
 
-    pass
+        if not steps:
+            context.debug(
+                'Pipeline {pipeline} has no nodes and no execution will happen'.format(
+                    pipeline=pipeline.display_name
+                )
+            )
+            context.events.pipeline_success()
+            return
+
+        context.debug(
+            'About to execute the compute node graph in the following order {order}'.format(
+                order=[step.key for step in steps]
+            )
+        )
+
+        check.invariant(len(steps[0].step_inputs) == 0)
+
+        dagma_execution_plan = dagma_engine.deploy_pipeline(pipeline)
+
+        for solid_result in _process_step_results(
+            context, pipeline, dagma_engine.execute_plan(context, dagma_execution_plan)
+        ):
+            if throw_on_error and not solid_result.success:
+                solid_result.reraise_user_error()
+
+            if not solid_result.success:
+                pipeline_success = False
+            yield solid_result
+
+        if pipeline_success:
+            context.events.pipeline_success()
+        else:
+            context.events.pipeline_failure()
 
 
 def execute_pipeline(
@@ -368,11 +422,16 @@ def execute_pipeline(
         root_directory,
     )
 
-    dagma_environment.engine.deploy_runtime()
+    dagma_engine = create_dagma_engine(dagma_environment)
+    dagma_engine.deploy_runtime()
 
-    dagma_environment.engine.deploy_pipeline(
-        pipeline_to_execute, dagma_environment.requirements, dagma_environment.includes
-    )
-
-    for solid_result in _do_iterate_pipeline(pipeline_to_execute, typed_environment, dagma_environment, reentrant_info, throw_on_error):
-        yield solid_result
+    with yield_context(pipeline, typed_environment, reentrant_info) as context:
+        for solid_result in _do_iterate_pipeline(
+            context,
+            pipeline_to_execute,
+            typed_environment,
+            dagma_engine,
+            reentrant_info,
+            throw_on_error,
+        ):
+            yield solid_result
