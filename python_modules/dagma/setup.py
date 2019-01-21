@@ -53,7 +53,6 @@ def _do_setup(name='dagma'):
         packages=find_packages(exclude=['dagma_tests']),
         install_requires=[
             'boto3==1.9.67',
-            'cloudpickle==0.3.1',
             (
                 'dagster @ git+https://github.com/dagster-io/dagster.git'
                 '@master#egg=dagster&subdirectory=python_modules/dagster'

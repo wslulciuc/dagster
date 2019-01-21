@@ -40,7 +40,6 @@ BUCKET_POLICY_DOCUMENT_TEMPLATE = """{{
 
 PYTHON_DEPENDENCIES = [
     'boto3',
-    'cloudpickler',
     'git+ssh://git@github.com/dagster-io/dagster.git'
     '@{version}#egg=dagma&subdirectory=python_modules/dagma'.format(version=__version__),
 ]

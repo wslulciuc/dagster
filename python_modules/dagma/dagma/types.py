@@ -54,7 +54,7 @@ class DagmaEngine(abc.ABC):
         pass
 
 
-class DagmaEngineConfig(ABC):
+class DagmaEngineConfig(abc.ABC):
     '''Abstract base class for dagma engine configs.
     
     Do not instantiate directly.

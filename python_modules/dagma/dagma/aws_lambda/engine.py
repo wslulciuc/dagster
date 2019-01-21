@@ -13,8 +13,6 @@ import tempfile
 
 from collections import namedtuple
 
-import cloudpickle as pickle
-
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
 from dagster.core.execution_plan.objects import ExecutionPlan

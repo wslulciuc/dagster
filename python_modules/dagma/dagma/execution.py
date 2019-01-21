@@ -352,8 +352,7 @@ def execute_pipeline(
         additional_includes,
         root_directory,
     )
-    raise Exception()
-    # Check that the pipeline has a dagma resource available
 
-    # Munge the dagma includes into the resource
-    # Munge the dagma requirements into the resource
+    dagma_environment.engine.deploy_runtime()
+
+    raise Exception()
