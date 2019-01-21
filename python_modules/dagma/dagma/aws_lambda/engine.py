@@ -2,22 +2,23 @@
 
 import base64
 import json
-import os
+import pickle
 
 from collections import namedtuple
+
+from botocore.errors import ClientError
 
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
 from dagster.core.execution_plan.objects import ExecutionPlan
+from dagster.utils import script_relative_path
 
-from ..types import DagmaEngine, LambdaInvocationPayload
+from ..types import DagmaEngine, DagmaEngineConfig, LambdaInvocationPayload
 from .config import ASSUME_ROLE_POLICY_DOCUMENT, BUCKET_POLICY_DOCUMENT_TEMPLATE, LAMBDA_MEMORY_SIZE
 from .utils import get_function_name, get_input_key, get_resources_key, get_step_key
 
 
-from ..types import DagmaEngine, DagmaEngineConfig
-
-SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOURCE_DIR = script_relative_path('.')
 
 
 def _get_python_runtime():
@@ -41,6 +42,8 @@ class LambdaEngine(DagmaEngine):
         check.inst_param(engine_config, 'engine_config', LambdaEngineConfig)
 
         self.engine_config = engine_config
+
+        super(self, DagmaEngine).__init__()
 
     @property
     def session(self):
@@ -82,6 +85,16 @@ class LambdaEngine(DagmaEngine):
         """The storage manager."""
         return self.engine_config.storage
 
+    @property
+    def runtime_bucket(self):
+        """The S3 bucket in which to store the runtime."""
+        return self.engine_config.runtime_s3_bucket
+
+    @property
+    def execution_bucket(self):
+        """The S3 bucket in which to store the functions and results."""
+        return self.engine_config.execution_s3_bucket
+
     def _get_or_create_iam_role(self):
         try:
             # TODO make the role name configurable
@@ -113,25 +126,24 @@ class LambdaEngine(DagmaEngine):
     def _seed_intermediate_results(self, context):
         intermediate_results = {}
         return self.storage.put_object(
-            key=get_input_key(context, 0), body=serialize(intermediate_results)
+            key=get_input_key(context, 0), body=pickle.dumps(intermediate_results)
         )
 
     def _upload_step(self, step_idx, step, context):
-        return self.storage.put_object(key=get_step_key(context, step_idx), body=serialize(step))
+        return self.storage.put_object(key=get_step_key(context, step_idx), body=pickle.dumps(step))
 
     def _create_lambda_step(self, deployment_package, context, role):
         runtime = _get_python_runtime()
         context.debug(
-            'About to create function with bucket {bucket} deployment_package_key {deploy_key}'.format(
-                bucket=context.resources.dagma.s3_bucket, deploy_key=deployment_package
-            )
+            'About to create function with bucket {bucket} deployment_package_key '
+            '{deploy_key}'.format(bucket=self.execution_bucket, deploy_key=deployment_package)
         )
         res = self.lambda_client.create_function(
             FunctionName=get_function_name(context),
             Runtime=runtime,
             Role=role.arn,
             Handler='dagma.aws_lambda_handler',
-            Code={'S3Bucket': context.resources.dagma.runtime_bucket, 'S3Key': deployment_package},
+            Code={'S3Bucket': self.execution_bucket, 'S3Key': deployment_package},
             Description='Handler for run {run_id} step {step_idx}'.format(
                 run_id=context.run_id, step_idx='0'
             ),
@@ -143,42 +155,37 @@ class LambdaEngine(DagmaEngine):
         context.debug(str(res))
         return res
 
-    def _upload_deployment_package(context, key, path):
+    def _upload_deployment_package(self, context, key, path):
         context.debug('Uploading deployment package')
         with open(path, 'rb') as fd:
-            return context.resources.dagma.storage.client.put_object(
-                Bucket=context.resources.dagma.runtime_bucket, Key=key, Body=fd
-            )
+            return self.storage.client.put_object(Bucket=self.execution_bucket, Key=key, Body=fd)
         context.debug('Done uploading deployment package')
 
-    def _create_and_upload_deployment_package(context, key):
-        with _construct_deployment_package(context, key) as deployment_package_path:
-            _upload_deployment_package(context, key, deployment_package_path)
+    def _create_and_upload_deployment_package(self, context, key):
+        with self._construct_deployment_package(context, key) as deployment_package_path:
+            self._upload_deployment_package(context, key, deployment_package_path)
 
-    def _get_deployment_package(context, key):
+    def _get_deployment_package(self, key):
         try:
-            context.resources.dagma.storage.client.head_object(
-                Bucket=context.resources.dagma.runtime_bucket, Key=key
-            )
+            self.storage.client.head_object(Bucket=self.execution_bucket, Key=key)
             return key
         except ClientError:
             return None
 
-    def get_or_create_deployment_package(context):
-        deployment_package_key = _get_deployment_package_key()
+    def get_or_create_deployment_package(self, context):
+        deployment_package_key = self._get_deployment_package_key()
 
         context.debug(
             'Looking for deployment package at {s3_bucket}/{s3_key}'.format(
-                s3_bucket=context.resources.dagma.runtime_bucket, s3_key=deployment_package_key
+                s3_bucket=self.execution_bucket, s3_key=deployment_package_key
             )
         )
 
-        if _get_deployment_package(context, deployment_package_key):
+        if not self._get_deployment_package(deployment_package_key):
+            context.debug('Creating deployment package...')
+            self._create_and_upload_deployment_package(context, deployment_package_key)
+        else:
             context.debug('Found deployment package!')
-            return deployment_package_key
-
-        context.debug('Creating deployment package...')
-        _create_and_upload_deployment_package(context, deployment_package_key)
 
         return deployment_package_key
 
@@ -266,7 +273,7 @@ class LambdaEngine(DagmaEngine):
 
         context.debug('Uploading execution_context')
         context.resources.dagma.storage.put_object(
-            key=get_resources_key(context), body=serialize(context.resources)
+            key=get_resources_key(context), body=pickle.dumps(context.resources)
         )
 
         for step_idx, step in enumerate(steps):
@@ -301,7 +308,7 @@ class LambdaEngine(DagmaEngine):
                 key=get_input_key(context, step_idx + 1)
             )
 
-            final_results = deserialize(final_results_object['Body'].read())
+            final_results = pickle.loads(final_results_object['Body'].read())
 
             return final_results
 

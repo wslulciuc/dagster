@@ -39,4 +39,3 @@ def test_run_null_pipeline():
         script_relative_path('dagma_test_config.yml'),
         print,
     )
-
