@@ -58,6 +58,7 @@ def _do_setup(name='dagma'):
                 '@master#egg=dagster&subdirectory=python_modules/dagster'
             ),
             'glob2==0.6',
+            'requirements-parser==0.2.0',
         ],
         entry_points={"console_scripts": ['dagma = dagma.cli:main']},
     )
