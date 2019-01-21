@@ -198,7 +198,7 @@ class LambdaEngine(DagmaEngine):
 
         return super().deploy_pipeline(pipeline)
 
-    def execute_step_async(lambda_client, lambda_step, context, payload):
+    def execute_step_async(self, lambda_step, context, payload):
         raise NotImplementedError()
         #   InvocationType='Event'|'RequestResponse'|'DryRun',
         # when we switch to Event, we'll need to poll Cloudwatch
@@ -215,8 +215,8 @@ class LambdaEngine(DagmaEngine):
         # #     limit=123
         # )
 
-    def _execute_step_sync(lambda_client, lambda_step, context, payload):
-        res = lambda_client.invoke(
+    def _execute_step_sync(self, lambda_step, context, payload):
+        res = self.lambda_client.invoke(
             FunctionName=lambda_step['FunctionArn'],
             Payload=json.dumps({'config': list(payload)}),
             InvocationType='RequestResponse',

@@ -1,9 +1,9 @@
+"""The handler for the AWS lambda engine."""
+
 import logging
 import pickle
 
 import boto3
-
-from io import BytesIO
 
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
@@ -24,7 +24,12 @@ def _all_inputs_covered(step, results):
 
 
 def aws_lambda_handler(event, _context):
-    """The lambda handler function."""
+    """The lambda handler function.
+
+    This is the function that is actually invoked for each step in the execution plan.
+
+    See: https://docs.aws.amazon.com/lambda/latest/dg/python-programming-model-handler-types.html
+    """
     logger.setLevel(logging.INFO)
 
     (
@@ -46,16 +51,16 @@ def aws_lambda_handler(event, _context):
     logger.info('Looking for inputs at %s/%s', s3_bucket, s3_key_inputs)
 
     intermediate_results_object = s3.get_object(Bucket=s3_bucket, Key=s3_key_inputs)
-    intermediate_results = deserialize(intermediate_results_object['Body'].read())
+    intermediate_results = pickle.loads(intermediate_results_object['Body'].read())
 
     logger.info('Looking for resources at %s/%s', s3_bucket, s3_key_resources)
     resources_object = s3.get_object(Bucket=s3_bucket, Key=s3_key_resources)
-    resources = deserialize(resources_object['Body'].read())
+    resources = pickle.loads(resources_object['Body'].read())
     execution_context = RuntimeExecutionContext(run_id, loggers=[logger], resources=resources)
 
     logger.info('Looking for step body at %s/%s', s3_bucket, s3_key_body)
     step_body_object = s3.get_object(Bucket=s3_bucket, Key=s3_key_body)
-    step = deserialize(step_body_object['Body'].read())
+    step = pickle.loads(step_body_object['Body'].read())
 
     logger.info('Checking inputs')
     if not _all_inputs_covered(step, intermediate_results):
@@ -81,7 +86,7 @@ def aws_lambda_handler(event, _context):
         input_value = intermediate_results[handle][1].value
         input_values[step_input.name] = input_value
 
-    logger.info('Executing step {key}'.format(key=key))
+    logger.info('Executing step %s', key)
     results = [result for result in execute_step(step, execution_context, input_values)]
 
     for result in results:
@@ -98,7 +103,7 @@ def aws_lambda_handler(event, _context):
     logger.info('Uploading intermediate_results to %s', s3_key_outputs)
     s3.put_object(
         ACL='public-read',
-        Body=serialize(intermediate_results),
+        Body=pickle.dumps(intermediate_results),
         Bucket=s3_bucket,
         Key=s3_key_outputs,
     )
