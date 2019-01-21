@@ -7,8 +7,6 @@ import distutils.spawn  # pylint: disable=no-name-in-module, import-error
 import os
 import subprocess
 
-from botocore.exceptions import ClientError
-
 from dagster import check
 from dagster.utils.zip import zip_folder
 

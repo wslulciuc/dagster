@@ -1,35 +1,21 @@
-"""The core dagma execution engine."""
+"""The AWS Lambda execution engine."""
 
 import base64
-import io
 import json
 import os
-import pickle
-import shutil
-import subprocess
-
-# import sys
-import tempfile
 
 from collections import namedtuple
 
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
 from dagster.core.execution_plan.objects import ExecutionPlan
-from dagster.utils.zip import zip_folder
 
 from ..types import DagmaEngine, LambdaInvocationPayload
-from .config import ASSUME_ROLE_POLICY_DOCUMENT, BUCKET_POLICY_DOCUMENT_TEMPLATE
+from .config import ASSUME_ROLE_POLICY_DOCUMENT, BUCKET_POLICY_DOCUMENT_TEMPLATE, LAMBDA_MEMORY_SIZE
 from .utils import get_function_name, get_input_key, get_resources_key, get_step_key
 
 
 from ..types import DagmaEngine, DagmaEngineConfig
-
-# TODO make this configurable on the dagma resource
-LAMBDA_MEMORY_SIZE = 3008
-
-# TODO: rip out this horror
-TEMPDIR_REGISTRY = []
 
 SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 

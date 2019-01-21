@@ -37,3 +37,6 @@ PYTHON_DEPENDENCIES = [
     'git+ssh://git@github.com/dagster-io/dagster.git'
     '@{version}#egg=dagma&subdirectory=python_modules/dagma'.format(version=__version__),
 ]
+
+# TODO make this configurable
+LAMBDA_MEMORY_SIZE = 3008
