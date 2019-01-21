@@ -38,20 +38,18 @@ class DagmaEngine(abc.ABC):
         Parameters:
           pipeline (PipelineDefinition): The dagster pipeline to deploy.
         '''
-        pass
 
-    def execute_solid_async(self, run_id):
-        '''Asynchronously execute a solid for a Dagma engine.
+    def execute_step_async(self, run_id):
+        '''Asynchronously execute an execution_step for a Dagma engine.
 
         FIXME: Need to define this API
         '''
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def execute_solid_sync(self, run_id):
-        '''Synchronously execute a solid for a Dagma engine.
+    def execute_step_sync(self, run_id):
+        '''Synchronously execute an execution step for a Dagma engine.
         '''
-        pass
 
 
 class DagmaEngineConfig(abc.ABC):

@@ -36,6 +36,6 @@ def test_run_null_pipeline():
         [],
         [],
         script_relative_path('dagma_test_requirements.txt'),
-        script_relative_path('dagma_test_config.yml'),
+        script_relative_path('../dagma_config.yml'),
         print,
     )

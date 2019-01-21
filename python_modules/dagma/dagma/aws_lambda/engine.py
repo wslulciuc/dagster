@@ -43,7 +43,7 @@ class LambdaEngine(DagmaEngine):
 
         self.engine_config = engine_config
 
-        super(self, DagmaEngine).__init__()
+        super(DagmaEngine, self).__init__()
 
     @property
     def session(self):
@@ -215,7 +215,7 @@ class LambdaEngine(DagmaEngine):
         # #     limit=123
         # )
 
-    def _execute_step_sync(self, lambda_step, context, payload):
+    def execute_step_sync(self, lambda_step, context, payload):
         res = self.lambda_client.invoke(
             FunctionName=lambda_step['FunctionArn'],
             Payload=json.dumps({'config': list(payload)}),

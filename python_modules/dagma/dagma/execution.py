@@ -315,10 +315,10 @@ class AirflowEngine(DagmaEngine):
 def create_dagma_engine(dagma_environment):
     check.inst_param(dagma_environment, 'dagma_environment', DagmaConfig)
 
-    if isinstance(dagma_environment.engine, LambdaEngineConfig):
-        return LambdaEngine(LambdaEngineConfig)
-    elif isinstance(dagma_environment.engine, AirflowEngineConfig):
-        return AirflowEngine(AirflowEngineConfig)
+    if isinstance(dagma_environment.engine_config, LambdaEngineConfig):
+        return LambdaEngine(dagma_environment.engine_config)
+    elif isinstance(dagma_environment.engine_config, AirflowEngineConfig):
+        return AirflowEngine(dagma_environment.engine_config)
     else:
         check.failed("Shouldn't be here: only supported engine types are lambda and airflow")
 

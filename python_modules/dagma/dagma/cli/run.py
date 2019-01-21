@@ -46,7 +46,7 @@ def _get_additional_requirements(requirements_path):
                 )
             )
         fd.seek(0)
-        return filter(None, fd.read().split('\n'))
+        return [line for line in fd.read().split('\n') if line is not None]
 
 
 def _process_results_for_console(pipeline_iter):
