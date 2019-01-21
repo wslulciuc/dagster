@@ -19,7 +19,8 @@ from dagster import (
     ReentrantInfo,
     String,
 )
-from dagster.core.execution import create_typed_environment, get_subset_pipeline
+from dagster.core.execution import create_typed_environment, get_subset_pipeline, yield_context
+from dagster.core.execution_context import RuntimeExecutionContext
 from dagster.core.types.evaluator import evaluate_config_value
 from dagster.core.system_config.types import (
     define_maybe_optional_selector_field,
@@ -303,6 +304,20 @@ def create_typed_dagma_environment(
     )
 
 
+def _do_iterate_pipeline(
+    pipeline, environment, dagma_environment, reentrant_info, throw_on_error
+):
+    check.inst(context, RuntimeExecutionContext)
+    pipeline_success = True:
+
+# from dagster.core.execution import yield_context
+# def execute(pipeline, typed_environment, reentrant_info):
+#     with yield_context(pipeline, typed_environment, reentrant_info):
+
+
+    pass
+
+
 def execute_pipeline(
     pipeline,
     environment,
@@ -355,4 +370,9 @@ def execute_pipeline(
 
     dagma_environment.engine.deploy_runtime()
 
-    raise Exception()
+    dagma_environment.engine.deploy_pipeline(
+        pipeline_to_execute, dagma_environment.requirements, dagma_environment.includes
+    )
+
+    for solid_result in _do_iterate_pipeline(pipeline_to_execute, typed_environment, dagma_environment, reentrant_info, throw_on_error):
+        yield solid_result
