@@ -30,7 +30,6 @@ def test_run_bad_dagma_config_path():
 
 
 def test_run_null_pipeline():
-    # with pytest.raises(DagsterInvariantViolationError):
     _do_run_command(
         NULL_PIPELINE,
         [],

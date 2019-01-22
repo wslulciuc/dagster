@@ -92,7 +92,7 @@ class LambdaEngine(DagmaEngine):
 
     @property
     def execution_bucket(self):
-        """The S3 bucket in which to store the functions and results."""
+        """The S3 bucket in which to store the results of the computation."""
         return self.engine_config.execution_s3_bucket
 
     def _get_or_create_iam_role(self):
@@ -172,7 +172,7 @@ class LambdaEngine(DagmaEngine):
         except ClientError:
             return None
 
-    def get_or_create_deployment_package(self, context):
+    def _get_or_create_deployment_package(self, context):
         deployment_package_key = self._get_deployment_package_key()
 
         context.debug(
@@ -190,8 +190,11 @@ class LambdaEngine(DagmaEngine):
         return deployment_package_key
 
     def deploy_runtime(self):
+        self._get_or_create_iam_role()
+        self._get_or_create_s3_bucket(self.runtime_bucket)
+        self._get_or_create_s3_bucket(self.execution_bucket)
         """Idempotently deploy the dagma runtime to AWS lambda."""
-        return super().deploy_runtime()
+        return True
 
     def deploy_pipeline(self, pipeline):
         self.deploy_runtime()

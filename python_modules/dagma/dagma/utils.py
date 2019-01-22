@@ -1,4 +1,8 @@
+"""Utility functions for dagma."""
 import contextlib
+
+# https://github.com/PyCQA/pylint/issues/73
+import distutils.spawn  # pylint: disable=no-name-in-module, import-error
 import errno
 import os
 import shutil
@@ -38,3 +42,8 @@ def tempdirs(i=1):
 
 def format_str_options(options):
     return '|'.join(['`\'{option}\'`'.format(option=option) for option in options])
+
+
+def which(exe):
+    # https://github.com/PyCQA/pylint/issues/73
+    return distutils.spawn.find_executable(exe)  # pylint: disable=no-member
