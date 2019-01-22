@@ -230,13 +230,14 @@ def construct_engine_config(engine_config_value):
         )
 
 
-class DagmaConfig(namedtuple('_DagmaConfig', 'engine_config requirements includes')):
-    def __new__(cls, engine=None, requirements=None, includes=None):
+class DagmaConfig(namedtuple('_DagmaConfig', 'engine_config requirements includes root_directory')):
+    def __new__(cls, engine=None, requirements=None, includes=None, root_directory=None):
         check.opt_inst_param(engine, 'engine', DagmaEngineConfig)
         check.opt_list_param(requirements, 'requirements')
         check.opt_list_param(includes, 'includes')
+        check.opt_str_param(root_directory, 'root_directory')
 
-        return super(DagmaConfig, cls).__new__(cls, engine, requirements, includes)
+        return super(DagmaConfig, cls).__new__(cls, engine, requirements, includes, root_directory)
 
 
 class DagmaRequirementsConfig(list):
@@ -302,6 +303,7 @@ def construct_dagma_config(
         engine=construct_engine_config(config_value['engine']),
         requirements=DagmaRequirementsConfig(requirements + additional_requirements),
         includes=construct_includes(includes, additional_includes, root_directory),
+        root_directory=root_directory,
     )
 
 
@@ -316,6 +318,7 @@ def create_typed_dagma_environment(
     check.opt_dict_param(dagma_config, 'dagma_config')
     check.opt_list_param(additional_requirements, 'additional_requirements')
     check.opt_list_param(additional_includes, 'additional_includes')
+    check.opt_str_param(root_directory)
 
     result = evaluate_config_value(DagmaConfigType, dagma_config)
 
@@ -338,9 +341,18 @@ def create_dagma_engine(dagma_environment):
     check.inst_param(dagma_environment, 'dagma_environment', DagmaConfig)
 
     if isinstance(dagma_environment.engine_config, LambdaEngineConfig):
-        return LambdaEngine(dagma_environment.engine_config)
+        return LambdaEngine(
+            dagma_environment.engine_config,
+            dagma_environment.requirements,
+            dagma_environment.includes,
+            dagma_environment.root_directory
+        )
     elif isinstance(dagma_environment.engine_config, AirflowEngineConfig):
-        return AirflowEngine(dagma_environment.engine_config)
+        return AirflowEngine(
+            dagma_environment.engine_config,
+            dagma_environment.requirements,
+            dagma_environment.includes,
+        )
     else:
         check.failed("Shouldn't be here: only supported engine types are lambda and airflow")
 
@@ -376,7 +388,7 @@ def _do_iterate_pipeline(
 
         check.invariant(len(steps[0].step_inputs) == 0)
 
-        dagma_execution_plan = dagma_engine.deploy_pipeline(context, pipeline)
+        dagma_execution_plan = dagma_engine.deploy_pipeline(context)
 
         for solid_result in _process_step_results(
             context, pipeline, dagma_engine.execute_plan(context, dagma_execution_plan)
@@ -428,7 +440,11 @@ def execute_pipeline(
     '''
 
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
-    check.opt_dict_param(environment, 'environment')
+    check.dict_param(environment, 'environment')
+    check.dict_param(dagma_config, 'dagma_config')
+    check.list_param(additional_requirements, 'additional_requirements', of_type=str)
+    check.list_param(additional_includes, 'additional_includes', of_type=str)
+    check.str_param(root_directory, 'root_directory')
     check.bool_param(throw_on_error, 'throw_on_error')
     check.opt_inst_param(reentrant_info, 'reentrant_info', ReentrantInfo)
     check.opt_list_param(solid_subset, 'solid_subset', of_type=str)

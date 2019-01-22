@@ -18,7 +18,7 @@ from dagster.utils import script_relative_path
 from dagster.utils.zip import zip_folder
 
 from ..types import DagmaEngine, DagmaEngineConfig, LambdaInvocationPayload
-from ..utils import tempdirs, which
+from ..utils import mkdir_p, tempdirs, which
 from .config import (
     ASSUME_ROLE_POLICY_DOCUMENT,
     BUCKET_POLICY_DOCUMENT_TEMPLATE,
@@ -40,7 +40,8 @@ def _get_python_runtime():
 class LambdaEngineConfig(
     namedtuple(
         '_LambdaEngineConfig',
-        'aws_region sessionmaker runtime_s3_bucket execution_s3_bucket storage',
+        'aws_region sessionmaker runtime_s3_bucket execution_s3_bucket storage '
+        'python_dependencies includes',
     ),
     DagmaEngineConfig,
 ):
@@ -48,10 +49,13 @@ class LambdaEngineConfig(
 
 
 class LambdaEngine(DagmaEngine):
-    def __init__(self, engine_config):
+    def __init__(self, engine_config, requirements, includes, root_directory):
         check.inst_param(engine_config, 'engine_config', LambdaEngineConfig)
 
         self.engine_config = engine_config
+        self.requirements = requirements
+        self.includes = includes
+        self.root_directory = root_directory
 
         super(DagmaEngine, self).__init__()
 
@@ -200,31 +204,21 @@ class LambdaEngine(DagmaEngine):
             return self.storage.client.put_object(Bucket=self.execution_bucket, Key=key, Body=fd)
         context.debug('Done uploading deployment package')
 
-    def _create_and_upload_deployment_package(self, context, key):
-        with self._construct_deployment_package(context, key) as deployment_package_path:
-            self._upload_deployment_package(context, key, deployment_package_path)
+    def _create_deployment_package(self, context):
 
-    def _get_or_create_deployment_package(self, context):
         deployment_package_key = self.deployment_package_key(context)
 
-        context.debug(
-            'Looking for deployment package at {s3_bucket}/{s3_key}'.format(
-                s3_bucket=self.execution_bucket, s3_key=deployment_package_key
+        with self._construct_deployment_package(
+            context, deployment_package_key
+        ) as deployment_package_path:
+            self._upload_deployment_package(
+                context, deployment_package_key, deployment_package_path
             )
-        )
-
-        self._create_and_upload_deployment_package(context, deployment_package_key)
 
         return deployment_package_key
 
     @contextlib.contextmanager
-    def _construct_deployment_package(self, context, key, python_dependencies=None, includes=None):
-
-        python_dependencies = check.opt_list_param(
-            python_dependencies, 'python_dependencies', of_type=str
-        )
-
-        includes = check.opt_list_param(includes, 'includes', of_type=str)
+    def _construct_deployment_package(self, context, key):
 
         if which('pip') is None:
             raise Exception('Couldn\'t find \'pip\' -- can\'t construct a deployment package')
@@ -233,7 +227,7 @@ class LambdaEngine(DagmaEngine):
             raise Exception('Couldn\'t find \'git\' -- can\'t construct a deployment package')
 
         with tempdirs(2) as (deployment_package_dir, archive_dir):
-            for python_dependency in PYTHON_DEPENDENCIES + python_dependencies:
+            for python_dependency in PYTHON_DEPENDENCIES + self.requirements:
                 process = subprocess.Popen(
                     ['pip', 'install', python_dependency, '--target', deployment_package_dir],
                     stderr=subprocess.PIPE,
@@ -244,10 +238,14 @@ class LambdaEngine(DagmaEngine):
 
             archive_path = os.path.join(archive_dir, key)
 
-            # Need to get all the includes into the archive
-            # for include in includes:
-            #     with open(include, 'r') as from_fd:
-            #         with open(os.path.join())
+            for include in self.includes:
+                with open(include, 'r') as from_fd:
+                    relative_path = os.path.relpath(include, self.root_directory)
+                    dir_path = os.path.join(archive_path, os.path.dirname(include))
+                    mkdir_p(dir_path)
+                    with open(os.path.join(archive_path, relative_path), 'w') as to_fd:
+                        to_fd.write(from_fd.read())
+
             try:
                 pwd = os.getcwd()
                 os.chdir(deployment_package_dir)
@@ -262,12 +260,14 @@ class LambdaEngine(DagmaEngine):
 
             yield archive_path
 
-    def deploy_pipeline(self, context, pipeline):
+    def deploy_pipeline(self, context, pipeline, python_dependencies, includes):
         """Idempotently deploy the dagma pipeline to AWS lambda."""
         role = self._get_or_create_iam_role(context)
         self._get_or_create_s3_bucket(context, self.runtime_bucket, role)
         self._get_or_create_s3_bucket(context, self.execution_bucket, role)
-
+        deployment_package_key = self._create_deployment_package(
+            context, self.python_dependencies, self.includes
+        )
 
     def execute_step_async(self, lambda_step, context, payload):
         raise NotImplementedError()
@@ -323,19 +323,6 @@ class LambdaEngine(DagmaEngine):
         )
 
         check.invariant(len(steps[0].step_inputs) == 0)
-
-        aws_lambda_client = context.resources.dagma.session.client('lambda')
-        aws_iam_client = context.resources.dagma.session.client('iam')
-        aws_iam_resource = context.resources.dagma.session.resource('iam')
-        aws_cloudwatch_client = context.resources.dagma.session.client('logs')
-        aws_s3_client = context.resources.dagma.session.client('s3')
-        aws_region_name = context.resources.dagma.aws_region_name
-
-        context.debug('Creating IAM role')
-        role = _get_or_create_iam_role(aws_iam_client, aws_iam_resource)
-
-        context.debug('Creating S3 bucket')
-        _get_or_create_s3_bucket(aws_s3_client, aws_region_name, role, context)
 
         context.debug('Seeding intermediate results')
         _seed_intermediate_results(context)
