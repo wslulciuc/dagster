@@ -260,14 +260,34 @@ class LambdaEngine(DagmaEngine):
 
             yield archive_path
 
-    def deploy_pipeline(self, context, pipeline, python_dependencies, includes):
+    def deploy_pipeline(self, context, pipeline):
         """Idempotently deploy the dagma pipeline to AWS lambda."""
         role = self._get_or_create_iam_role(context)
         self._get_or_create_s3_bucket(context, self.runtime_bucket, role)
         self._get_or_create_s3_bucket(context, self.execution_bucket, role)
-        deployment_package_key = self._create_deployment_package(
-            context, self.python_dependencies, self.includes
+        deployment_package_key = self._create_deployment_package(context)
+
+        context.debug('Seeding intermediate results')
+        self._seed_intermediate_results(context)
+
+        context.debug('Uploading resources')
+        self.storage.put_object(
+            key=self.resources_key(context), body=pickle.dumps(context.resources)
         )
+
+        for step_idx, step in enumerate(steps):
+            context.debug(
+                'Uploading step {step_key}: {s3_key}'.format(
+                    step_key=step.key, s3_key=get_step_key(context, step_idx)
+                )
+            )
+            _upload_step(aws_s3_client, step_idx, step, context)
+
+        try:
+            lambda_step = _create_lambda_step(
+                aws_lambda_client, deployment_package_key, context, role
+            )
+
 
     def execute_step_async(self, lambda_step, context, payload):
         raise NotImplementedError()
@@ -303,49 +323,8 @@ class LambdaEngine(DagmaEngine):
 
     def execute_plan(self, context, execution_plan, cleanup_lambda_functions=True, local=False):
         """Core executor."""
-        check.inst_param(context, 'context', RuntimeExecutionContext)
-        check.inst_param(execution_plan, 'execution_plan', ExecutionPlan)
 
-        steps = list(execution_plan.topological_steps())
 
-        if not steps:
-            context.debug(
-                'Pipeline {pipeline} has no nodes and no execution will happen'.format(
-                    pipeline=context.pipeline
-                )
-            )
-            return
-
-        context.debug(
-            'About to compile the compute node graph to lambda in the following order {order}'.format(
-                order=[step.key for step in steps]
-            )
-        )
-
-        check.invariant(len(steps[0].step_inputs) == 0)
-
-        context.debug('Seeding intermediate results')
-        _seed_intermediate_results(context)
-
-        deployment_package_key = get_or_create_deployment_package(context)
-
-        context.debug('Uploading execution_context')
-        context.resources.dagma.storage.put_object(
-            key=get_resources_key(context), body=pickle.dumps(context.resources)
-        )
-
-        for step_idx, step in enumerate(steps):
-            context.debug(
-                'Uploading step {step_key}: {s3_key}'.format(
-                    step_key=step.key, s3_key=get_step_key(context, step_idx)
-                )
-            )
-            _upload_step(aws_s3_client, step_idx, step, context)
-
-        try:
-            lambda_step = _create_lambda_step(
-                aws_lambda_client, deployment_package_key, context, role
-            )
 
             for step_idx, _ in enumerate(steps):
                 payload = LambdaInvocationPayload(
