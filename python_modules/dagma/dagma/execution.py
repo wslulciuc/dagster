@@ -258,8 +258,30 @@ def construct_includes(config_includes, additional_includes, root_directory):
         os.path.abspath(os.path.join(root_directory, config_include))
         for config_include in config_includes
     ]
+
+    errors = []
     for include in additional_includes:
-        assert os.path.isabs(include)
+        if not os.path.isabs(include):
+            errors.append(include)
+
+    if errors:
+        check.failed(
+            'Shouldn\'t be here: got additional_includes that weren\'t absolute paths: '
+            '{bad_paths}'.format(bad_paths=', '.join(['"{error}"' for error in errors]))
+        )
+
+    if not (
+        os.path.commonprefix(config_includes + additional_includes + [root_directory])
+        == root_directory
+    ):
+        errors = []
+        for include in config_includes + additional_includes:
+            if not os.path.commonprefix([include, root_directory]) == root_directory:
+                errors.append(include)
+        check.failed(
+            'Can\'t include paths outside of the root directory: '
+            '{bad_paths}'.format(bad_paths=', '.join(['"{error}"' for error in errors]))
+        )
     return DagmaIncludesConfig(config_includes + additional_includes)
 
 
@@ -423,7 +445,6 @@ def execute_pipeline(
     )
 
     dagma_engine = create_dagma_engine(dagma_environment)
-    dagma_engine.deploy_runtime()
 
     with yield_context(pipeline, typed_environment, reentrant_info) as context:
         for solid_result in _do_iterate_pipeline(

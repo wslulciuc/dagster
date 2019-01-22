@@ -267,7 +267,7 @@ class LambdaEngine(DagmaEngine):
         role = self._get_or_create_iam_role(context)
         self._get_or_create_s3_bucket(context, self.runtime_bucket, role)
         self._get_or_create_s3_bucket(context, self.execution_bucket, role)
-        self.deploy_runtime()
+
 
     def execute_step_async(self, lambda_step, context, payload):
         raise NotImplementedError()
