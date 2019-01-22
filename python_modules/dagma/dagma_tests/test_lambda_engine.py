@@ -79,7 +79,7 @@ NULL_PIPELINE = PipelineDefinition([])
 def run_test_pipeline(pipeline):
     return execute_pipeline(
         pipeline=pipeline,
-        environment={},
+        environment=load_yaml_from_path(script_relative_path('config.yml')),
         dagma_config=load_yaml_from_path(script_relative_path('dagma_config.yml')),
         additional_includes=[],
         additional_requirements=[],

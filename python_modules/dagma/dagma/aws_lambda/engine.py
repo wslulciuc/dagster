@@ -1,26 +1,36 @@
 """The AWS Lambda execution engine."""
 
+import contextlib
 import base64
 import json
+import os
 import pickle
+import subprocess
+
+import botocore
 
 from collections import namedtuple
-
-from botocore.exceptions import ClientError
 
 from dagster import check
 from dagster.core.execution_context import RuntimeExecutionContext
 from dagster.core.execution_plan.objects import ExecutionPlan
 from dagster.utils import script_relative_path
+from dagster.utils.zip import zip_folder
 
 from ..types import DagmaEngine, DagmaEngineConfig, LambdaInvocationPayload
-from .config import ASSUME_ROLE_POLICY_DOCUMENT, BUCKET_POLICY_DOCUMENT_TEMPLATE, LAMBDA_MEMORY_SIZE
-from .utils import get_function_name, get_input_key, get_resources_key, get_step_key
+from ..utils import tempdirs, which
+from .config import (
+    ASSUME_ROLE_POLICY_DOCUMENT,
+    BUCKET_POLICY_DOCUMENT_TEMPLATE,
+    LAMBDA_MEMORY_SIZE,
+    PYTHON_DEPENDENCIES,
+)
 
 
 SOURCE_DIR = script_relative_path('.')
 
 
+# TODO: make this configurable
 def _get_python_runtime():
     # if sys.version_info[0] < 3:
     #     return 'python2.7'
@@ -95,27 +105,54 @@ class LambdaEngine(DagmaEngine):
         """The S3 bucket in which to store the results of the computation."""
         return self.engine_config.execution_s3_bucket
 
-    def _get_or_create_iam_role(self):
+    def function_key(self, context):
+        return '{run_id}_function'.format(run_id=context.run_id)
+
+    def step_key(self, context, step_idx):
+        return '{run_id}_step_{step_idx}.pickle'.format(run_id=context.run_id, step_idx=step_idx)
+
+    def intermediate_results_key(self, context, step_idx):
+        return '{run_id}_intermediate_results_{step_idx}.pickle'.format(
+            run_id=context.run_id, step_idx=step_idx
+        )
+
+    def deployment_package_key(self, context):
+        return '{run_id}_deployment_package.zip'.format(run_id=context.run_id)
+
+    def resources_key(self, context):
+        return '{run_id}_resources.pickle'.format(run_id=context.run_id)
+
+    def _get_or_create_iam_role(self, context):
         try:
+            context.debug('Retrieving or creating lambda IAM role...')
             # TODO make the role name configurable
             role = self.iam_client.create_role(
                 RoleName='dagster_lambda_iam_role',
                 AssumeRolePolicyDocument=ASSUME_ROLE_POLICY_DOCUMENT,
             )
-        except self.iam_client.exceptions.EntityAlreadyExistsException:
-            role = self.iam_resource.Role('dagster_lambda_iam_role')
-            role.load()
+        except botocore.exceptions.ClientError as e:
+            if 'EntityAlreadyExistsException' == e.__class__.__name__:
+                context.debug('Found existing IAM role!')
+                role = self.iam_resource.Role('dagster_lambda_iam_role')
+                role.load()
+            else:
+                raise
+        else:
+            context.debug('Created new IAM role!')
         return role
 
-    def _get_or_create_s3_bucket(self, bucket, role, context):
+    def _get_or_create_s3_bucket(self, context, bucket, role):
         try:
             self.s3_client.create_bucket(
                 ACL='private',
                 Bucket=bucket,
                 CreateBucketConfiguration={'LocationConstraint': self.aws_region},
             )
-        except self.s3_client.exceptions.BucketAlreadyOwnedByYou:
-            pass
+        except botocore.exceptions.ClientError as e:
+            if 'BucketAlreadyOwnedByYou' == e.__class__.__name__:
+                pass
+            else:
+                raise
 
         policy = BUCKET_POLICY_DOCUMENT_TEMPLATE.format(
             role_arn=role.arn, bucket_arn='arn:aws:s3:::' + bucket
@@ -126,11 +163,13 @@ class LambdaEngine(DagmaEngine):
     def _seed_intermediate_results(self, context):
         intermediate_results = {}
         return self.storage.put_object(
-            key=get_input_key(context, 0), body=pickle.dumps(intermediate_results)
+            key=self.intermediate_results_key(context, 0), body=pickle.dumps(intermediate_results)
         )
 
     def _upload_step(self, step_idx, step, context):
-        return self.storage.put_object(key=get_step_key(context, step_idx), body=pickle.dumps(step))
+        return self.storage.put_object(
+            key=self.step_key(context, step_idx), body=pickle.dumps(step)
+        )
 
     def _create_lambda_step(self, deployment_package, context, role):
         runtime = _get_python_runtime()
@@ -139,7 +178,7 @@ class LambdaEngine(DagmaEngine):
             '{deploy_key}'.format(bucket=self.execution_bucket, deploy_key=deployment_package)
         )
         res = self.lambda_client.create_function(
-            FunctionName=get_function_name(context),
+            FunctionName=self.function_key(context),
             Runtime=runtime,
             Role=role.arn,
             Handler='dagma.aws_lambda_handler',
@@ -165,15 +204,8 @@ class LambdaEngine(DagmaEngine):
         with self._construct_deployment_package(context, key) as deployment_package_path:
             self._upload_deployment_package(context, key, deployment_package_path)
 
-    def _get_deployment_package(self, key):
-        try:
-            self.storage.client.head_object(Bucket=self.execution_bucket, Key=key)
-            return key
-        except ClientError:
-            return None
-
     def _get_or_create_deployment_package(self, context):
-        deployment_package_key = self._get_deployment_package_key()
+        deployment_package_key = self.deployment_package_key(context)
 
         context.debug(
             'Looking for deployment package at {s3_bucket}/{s3_key}'.format(
@@ -181,25 +213,61 @@ class LambdaEngine(DagmaEngine):
             )
         )
 
-        if not self._get_deployment_package(deployment_package_key):
-            context.debug('Creating deployment package...')
-            self._create_and_upload_deployment_package(context, deployment_package_key)
-        else:
-            context.debug('Found deployment package!')
+        self._create_and_upload_deployment_package(context, deployment_package_key)
 
         return deployment_package_key
 
-    def deploy_runtime(self):
-        self._get_or_create_iam_role()
-        self._get_or_create_s3_bucket(self.runtime_bucket)
-        self._get_or_create_s3_bucket(self.execution_bucket)
-        """Idempotently deploy the dagma runtime to AWS lambda."""
-        return True
+    @contextlib.contextmanager
+    def _construct_deployment_package(self, context, key, python_dependencies=None, includes=None):
 
-    def deploy_pipeline(self, pipeline):
+        python_dependencies = check.opt_list_param(
+            python_dependencies, 'python_dependencies', of_type=str
+        )
+
+        includes = check.opt_list_param(includes, 'includes', of_type=str)
+
+        if which('pip') is None:
+            raise Exception('Couldn\'t find \'pip\' -- can\'t construct a deployment package')
+
+        if which('git') is None:
+            raise Exception('Couldn\'t find \'git\' -- can\'t construct a deployment package')
+
+        with tempdirs(2) as (deployment_package_dir, archive_dir):
+            for python_dependency in PYTHON_DEPENDENCIES + python_dependencies:
+                process = subprocess.Popen(
+                    ['pip', 'install', python_dependency, '--target', deployment_package_dir],
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                )
+                for line in iter(process.stdout.readline, b''):
+                    context.debug(line.decode('utf-8'))
+
+            archive_path = os.path.join(archive_dir, key)
+
+            # Need to get all the includes into the archive
+            # for include in includes:
+            #     with open(include, 'r') as from_fd:
+            #         with open(os.path.join())
+            try:
+                pwd = os.getcwd()
+                os.chdir(deployment_package_dir)
+                zip_folder('.', archive_path)
+                context.debug(
+                    'Zipped archive at {archive_path}: {size} bytes'.format(
+                        archive_path=archive_path, size=os.path.getsize(archive_path)
+                    )
+                )
+            finally:
+                os.chdir(pwd)
+
+            yield archive_path
+
+    def deploy_pipeline(self, context, pipeline):
+        """Idempotently deploy the dagma pipeline to AWS lambda."""
+        role = self._get_or_create_iam_role(context)
+        self._get_or_create_s3_bucket(context, self.runtime_bucket, role)
+        self._get_or_create_s3_bucket(context, self.execution_bucket, role)
         self.deploy_runtime()
-
-        return super().deploy_pipeline(pipeline)
 
     def execute_step_async(self, lambda_step, context, payload):
         raise NotImplementedError()

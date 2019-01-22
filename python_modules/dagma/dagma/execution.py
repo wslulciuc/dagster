@@ -354,7 +354,7 @@ def _do_iterate_pipeline(
 
         check.invariant(len(steps[0].step_inputs) == 0)
 
-        dagma_execution_plan = dagma_engine.deploy_pipeline(pipeline)
+        dagma_execution_plan = dagma_engine.deploy_pipeline(context, pipeline)
 
         for solid_result in _process_step_results(
             context, pipeline, dagma_engine.execute_plan(context, dagma_execution_plan)
