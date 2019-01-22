@@ -26,24 +26,20 @@ class PipelineRunStatus(Enum):
 class PipelineRunStorage(object):
     @staticmethod
     def in_memory():
-        return PipelineRunStorage(create_pipeline_run=InMemoryPipelineRun)
+        return InMemoryPipelineRunStorage()
 
     @staticmethod
     def filesystem(log_dir):
         check.str_param(log_dir, 'log_dir')
-        return PipelineRunStorage(
-            lambda *args, **kwargs: LogFilePipelineRun(log_dir, *args, **kwargs)
-        )
+        return LogFilePipelineRunStorage(log_dir)
 
-    def __init__(self, create_pipeline_run):
+    def __init__(self):
         self._runs = OrderedDict()
-        if not create_pipeline_run:
-            create_pipeline_run = InMemoryPipelineRun
-        self._create_pipeline_run = create_pipeline_run
 
-    def add_run(self, pipeline_run):
+    def _add_run_instance(self, pipeline_run):
         check.inst_param(pipeline_run, 'pipeline_run', PipelineRun)
         self._runs[pipeline_run.run_id] = pipeline_run
+        return pipeline_run
 
     def all_runs(self):
         return self._runs.values()
@@ -51,14 +47,29 @@ class PipelineRunStorage(object):
     def all_runs_for_pipeline(self, pipeline_name):
         return [r for r in self.all_runs() if r.pipeline_name == pipeline_name]
 
-    def get_run_by_id(self, id_):
-        return self._runs.get(id_)
+    def get_run_by_id(self, run_id):
+        return self._runs.get(run_id)
 
-    def __getitem__(self, id_):
-        return self.get_run_by_id(id_)
+    def __getitem__(self, run_id):
+        return self.get_run_by_id(run_id)
 
-    def create_run(self, *args, **kwargs):
-        return self._create_pipeline_run(*args, **kwargs)
+
+class InMemoryPipelineRunStorage(PipelineRunStorage):
+    def add_run(self, run_id, selector, env_config, execution_plan):
+        return self._add_run_instance(
+            InMemoryPipelineRun(run_id, selector, env_config, execution_plan)
+        )
+
+
+class LogFilePipelineRunStorage(PipelineRunStorage):
+    def __init__(self, log_dir):
+        super(LogFilePipelineRunStorage, self).__init__()
+        self._log_dir = log_dir
+
+    def add_run(self, run_id, selector, env_config, execution_plan):
+        return self._add_run_instance(
+            LogFilePipelineRun(self._log_dir, run_id, selector, env_config, execution_plan)
+        )
 
 
 class PipelineRun(object):
