@@ -363,7 +363,7 @@ def define_repository():
 def define_context():
     return DagsterGraphQLContext(
         RepositoryContainer(repository=define_repository()),
-        PipelineRunStorage(),
+        PipelineRunStorage.in_memory(),
         execution_manager=SynchronousExecutionManager(),
     )
 

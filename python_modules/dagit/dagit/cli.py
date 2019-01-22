@@ -66,15 +66,7 @@ def ui(host, port, watch, sync, log, log_dir, **kwargs):
 
     sys.path.append(os.getcwd())
     repository_container = RepositoryContainer(repository_target_info)
-    if log:
-
-        def create_pipeline_run(*args, **kwargs):
-            return LogFilePipelineRun(log_dir, *args, **kwargs)
-
-    else:
-        create_pipeline_run = InMemoryPipelineRun
-
-    pipeline_run_storage = PipelineRunStorage(create_pipeline_run=create_pipeline_run)
+    pipeline_run_storage = create_pipeline_run_storage(log, log_dir)
 
     if watch:
         observer = Observer()
@@ -91,6 +83,13 @@ def ui(host, port, watch, sync, log, log_dir, **kwargs):
     except KeyboardInterrupt:
         if watch:
             observer.stop()
+
+
+def create_pipeline_run_storage(log, log_dir):
+    if log:
+        return PipelineRunStorage.filesystem(log_dir)
+    else:
+        return PipelineRunStorage.in_memory()
 
 
 def main():

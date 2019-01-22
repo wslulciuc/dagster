@@ -24,7 +24,18 @@ class PipelineRunStatus(Enum):
 
 
 class PipelineRunStorage(object):
-    def __init__(self, create_pipeline_run=None):
+    @staticmethod
+    def in_memory():
+        return PipelineRunStorage(create_pipeline_run=InMemoryPipelineRun)
+
+    @staticmethod
+    def filesystem(log_dir):
+        check.str_param(log_dir, 'log_dir')
+        return PipelineRunStorage(
+            lambda *args, **kwargs: LogFilePipelineRun(log_dir, *args, **kwargs)
+        )
+
+    def __init__(self, create_pipeline_run):
         self._runs = OrderedDict()
         if not create_pipeline_run:
             create_pipeline_run = InMemoryPipelineRun

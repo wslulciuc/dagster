@@ -7,7 +7,7 @@ from dagster.tutorials.intro_tutorial.repos import define_repo
 
 def test_smoke_app():
     repository_container = app.RepositoryContainer(repository=define_repo())
-    pipeline_run_storage = PipelineRunStorage()
+    pipeline_run_storage = PipelineRunStorage.in_memory()
     flask_app = app.create_app(repository_container, pipeline_run_storage)
     client = flask_app.test_client()
 
@@ -17,6 +17,6 @@ def test_smoke_app():
 
     assert len(data['data']['pipelines']['nodes']) == 1
 
-    assert set([node_data['name'] for node_data in data['data']['pipelines']['nodes']]) == set(
+    assert {node_data['name'] for node_data in data['data']['pipelines']['nodes']} == set(
         ['repo_demo_pipeline']
     )
