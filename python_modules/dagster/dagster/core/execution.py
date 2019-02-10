@@ -67,7 +67,7 @@ from .execution_plan.objects import (
 
 from .execution_plan.plan_subset import MarshalledOutput
 
-from .execution_plan.simple_engine import iterate_step_events_for_execution_plan
+from .execution_plan.simple_engine import execute_plan_in_engine
 
 from .init_context import InitContext, InitResourceContext
 
@@ -77,6 +77,11 @@ from .system_config.objects import EnvironmentConfig
 
 from .types.evaluator import EvaluationError, evaluate_config_value, friendly_string_for_error
 from .types.marshal import FilePersistencePolicy
+
+
+class DagsterSimpleExecutor:
+    def __init__(self):
+        self.executor_fn = execute_plan_in_engine
 
 
 class PipelineExecutionResult(object):
@@ -240,8 +245,7 @@ class SolidExecutionResult(object):
 def create_execution_plan(pipeline, env_config=None, execution_metadata=None, subset_info=None):
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
     check.opt_dict_param(env_config, 'env_config', key_type=str)
-    execution_metadata = execution_metadata if execution_metadata else ExecutionMetadata()
-    check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+    execution_metadata = check_execution_metadata_param(execution_metadata)
     check.opt_inst_param(subset_info, 'subset_info', ExecutionPlanSubsetInfo)
 
     typed_environment = create_typed_environment(pipeline, env_config)
@@ -276,12 +280,12 @@ def get_event_callback(execution_metadata):
 
 def get_tags(user_context_params, execution_metadata, pipeline):
     check.inst_param(user_context_params, 'user_context_params', ExecutionContext)
-    check.opt_inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+    check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
 
     base_tags = merge_dicts({'pipeline': pipeline.name}, user_context_params.tags)
 
-    if execution_metadata and execution_metadata.tags:
+    if execution_metadata.tags:
         user_keys = set(user_context_params.tags.keys())
         provided_keys = set(execution_metadata.tags.keys())
         if not user_keys.isdisjoint(provided_keys):
@@ -388,6 +392,7 @@ def construct_pipeline_execution_context(
             event_callback=get_event_callback(execution_metadata),
             environment_config=environment.original_config_dict,
             persistence_strategy=_create_persistence_strategy(environment.context.persistence),
+            execution_metadata=execution_metadata,
         ),
         tags=tags,
         log=log,
@@ -458,8 +463,24 @@ def get_resource_or_gen(pipeline_def, context_definition, resource_name, environ
     )
 
 
+def _iterate_step_events(pipeline_context, execution_plan, throw_on_user_error, engine_executor):
+    check.inst_param(pipeline_context, 'pipeline_context', PipelineExecutionContext)
+    check.inst_param(execution_plan, 'execution_plan', ExecutionPlan)
+    check.bool_param(throw_on_user_error, 'throw_on_user_error')
+
+    for step_event in engine_executor.executor_fn(pipeline_context, execution_plan):
+        if throw_on_user_error and step_event.is_step_failure:
+            step_event.reraise_user_error()
+        yield step_event
+
+
 def _do_iterate_pipeline(
-    pipeline, pipeline_context, typed_environment, execution_metadata, throw_on_user_error=True
+    pipeline,
+    pipeline_context,
+    typed_environment,
+    execution_metadata,
+    throw_on_user_error,
+    engine_executor,
 ):
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
     check.inst_param(pipeline_context, 'context', PipelineExecutionContext)
@@ -495,8 +516,8 @@ def _do_iterate_pipeline(
     for solid_result in _process_step_events(
         pipeline_context,
         pipeline,
-        iterate_step_events_for_execution_plan(
-            pipeline_context, execution_plan, throw_on_user_error
+        _iterate_step_events(
+            pipeline_context, execution_plan, throw_on_user_error, engine_executor
         ),
     ):
         if not solid_result.success:
@@ -510,7 +531,12 @@ def _do_iterate_pipeline(
 
 
 def execute_pipeline_iterator(
-    pipeline, environment=None, throw_on_user_error=True, execution_metadata=None, solid_subset=None
+    pipeline,
+    environment=None,
+    throw_on_user_error=True,
+    execution_metadata=None,
+    solid_subset=None,
+    engine_executor=DagsterSimpleExecutor(),
 ):
     '''Returns iterator that yields :py:class:`SolidExecutionResult` for each
     solid executed in the pipeline.
@@ -525,8 +551,7 @@ def execute_pipeline_iterator(
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
     check.opt_dict_param(environment, 'environment')
     check.bool_param(throw_on_user_error, 'throw_on_user_error')
-    execution_metadata = execution_metadata if execution_metadata else ExecutionMetadata()
-    check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+    execution_metadata = check_execution_metadata_param(execution_metadata)
     check.opt_list_param(solid_subset, 'solid_subset', of_type=str)
 
     pipeline_to_execute = get_subset_pipeline(pipeline, solid_subset)
@@ -541,6 +566,7 @@ def execute_pipeline_iterator(
             typed_environment,
             execution_metadata=execution_metadata,
             throw_on_user_error=throw_on_user_error,
+            engine_executor=engine_executor,
         ):
             yield solid_result
 
@@ -631,8 +657,11 @@ def execute_externalized_plan(
         )
 
         return list(
-            iterate_step_events_for_execution_plan(
-                pipeline_context, execution_plan, throw_on_user_error=throw_on_user_error
+            _iterate_step_events(
+                pipeline_context,
+                execution_plan,
+                throw_on_user_error=throw_on_user_error,
+                engine_executor=DagsterSimpleExecutor(),
             )
         )
 
@@ -676,28 +705,78 @@ def _check_inputs_to_marshal(execution_plan, inputs_to_marshal):
                 )
 
 
+def check_execution_metadata_param(execution_metadata):
+    return (
+        check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+        if execution_metadata is not None
+        else ExecutionMetadata()
+    )
+
+
 def execute_plan(
-    pipeline, execution_plan, environment=None, execution_metadata=None, throw_on_user_error=True
+    pipeline,
+    execution_plan,
+    environment=None,
+    execution_metadata=None,
+    throw_on_user_error=True,
+    engine_executor=DagsterSimpleExecutor(),
 ):
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
     check.inst_param(execution_plan, 'execution_plan', ExecutionPlan)
-    check.opt_dict_param(environment, 'environment')
-    execution_metadata = execution_metadata if execution_metadata else ExecutionMetadata()
-    check.opt_inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+    environment = check.opt_dict_param(environment, 'environment')
+    execution_metadata = check_execution_metadata_param(execution_metadata)
+    check.bool_param(throw_on_user_error, 'throw_on_user_error')
 
     typed_environment = create_typed_environment(pipeline, environment)
     with yield_pipeline_execution_context(
         pipeline, typed_environment, execution_metadata
     ) as pipeline_context:
         return list(
-            iterate_step_events_for_execution_plan(
-                pipeline_context, execution_plan, throw_on_user_error=throw_on_user_error
+            _iterate_step_events(
+                pipeline_context,
+                execution_plan,
+                throw_on_user_error=throw_on_user_error,
+                engine_executor=engine_executor,
             )
         )
 
 
+def iterate_execution_plan(
+    pipeline,
+    subset_info,
+    environment=None,
+    execution_metadata=None,
+    throw_on_user_error=True,
+    engine_executor=DagsterSimpleExecutor(),
+):
+    check.inst_param(pipeline, 'pipeline', PipelineDefinition)
+    check.opt_dict_param(environment, 'environment')
+
+    typed_environment = create_typed_environment(pipeline, environment)
+    with yield_pipeline_execution_context(
+        pipeline, typed_environment, execution_metadata
+    ) as pipeline_context:
+        execution_plan = create_execution_plan_core(
+            ExecutionPlanInfo(pipeline_context, pipeline, typed_environment),
+            execution_metadata,
+            subset_info,
+        )
+        for step_event in _iterate_step_events(
+            pipeline_context,
+            execution_plan,
+            throw_on_user_error=throw_on_user_error,
+            engine_executor=engine_executor,
+        ):
+            yield step_event
+
+
 def execute_pipeline(
-    pipeline, environment=None, throw_on_user_error=True, execution_metadata=None, solid_subset=None
+    pipeline,
+    environment=None,
+    throw_on_user_error=True,
+    execution_metadata=None,
+    solid_subset=None,
+    engine_executor=DagsterSimpleExecutor(),
 ):
     '''
     "Synchronous" version of :py:func:`execute_pipeline_iterator`.
@@ -719,7 +798,7 @@ def execute_pipeline(
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
     check.opt_dict_param(environment, 'environment')
     check.bool_param(throw_on_user_error, 'throw_on_user_error')
-    execution_metadata = execution_metadata if execution_metadata else ExecutionMetadata()
+    execution_metadata = check_execution_metadata_param(execution_metadata)
     check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
     check.opt_list_param(solid_subset, 'solid_subset', of_type=str)
 
@@ -730,6 +809,7 @@ def execute_pipeline(
         typed_environment,
         execution_metadata=execution_metadata,
         throw_on_user_error=throw_on_user_error,
+        engine_executor=engine_executor,
     )
 
 
@@ -774,11 +854,18 @@ def build_sub_pipeline(pipeline_def, solid_names):
 
 
 def execute_pipeline_with_metadata(
-    pipeline, typed_environment, execution_metadata, throw_on_user_error
+    pipeline,
+    environment,
+    execution_metadata,
+    throw_on_user_error,
+    engine_executor=DagsterSimpleExecutor(),
 ):
     check.inst_param(pipeline, 'pipeline', PipelineDefinition)
-    check.inst_param(typed_environment, 'typed_environment', EnvironmentConfig)
+    environment = check.opt_dict_param(environment, 'environment')
+    # check.inst_param(typed_environment, 'typed_environment', EnvironmentConfig)
     check.inst_param(execution_metadata, 'execution_metadata', ExecutionMetadata)
+
+    typed_environment = create_typed_environment(environment)
 
     with yield_pipeline_execution_context(
         pipeline, typed_environment, execution_metadata
@@ -793,6 +880,7 @@ def execute_pipeline_with_metadata(
                     typed_environment,
                     execution_metadata=execution_metadata,
                     throw_on_user_error=throw_on_user_error,
+                    engine_executor=engine_executor,
                 )
             ),
         )

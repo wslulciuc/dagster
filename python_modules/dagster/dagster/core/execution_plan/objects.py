@@ -269,6 +269,13 @@ class ExecutionPlan(object):
         for step_key in ordered_step_keys:
             yield self.step_dict[step_key]
 
+    def topological_step_levels(self):
+        step_key_graph = list(toposort.toposort(self.deps))
+        step_graph = []
+        for step_key_set in step_key_graph:
+            step_graph.append([self.step_dict[sk] for sk in step_key_set])
+        return step_graph
+
 
 class ExecutionPlanInfo(namedtuple('_ExecutionPlanInfo', 'context pipeline environment')):
     def __new__(cls, context, pipeline, environment):

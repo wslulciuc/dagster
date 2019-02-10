@@ -44,3 +44,4 @@ clean:
 	rm -rf ./dagster/docs/_build
 	rm -rf ./dagster/htmlcov/
 	rm -rf ./dagster/build/
+	find . -name "__pycache__" -delete

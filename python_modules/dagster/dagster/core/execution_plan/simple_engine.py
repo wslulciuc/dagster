@@ -38,10 +38,9 @@ def _all_inputs_covered(step, results):
     return True
 
 
-def iterate_step_events_for_execution_plan(pipeline_context, execution_plan, throw_on_user_error):
+def execute_plan_in_engine(pipeline_context, execution_plan):
     check.inst_param(pipeline_context, 'pipeline_context', PipelineExecutionContext)
     check.inst_param(execution_plan, 'execution_plan', ExecutionPlan)
-    check.bool_param(throw_on_user_error, 'throw_on_user_error')
 
     steps = list(execution_plan.topological_steps())
 
@@ -73,9 +72,6 @@ def iterate_step_events_for_execution_plan(pipeline_context, execution_plan, thr
 
         for step_event in iterate_step_events_for_step(step, step_context, input_values):
             check.inst(step_event, ExecutionStepEvent)
-
-            if throw_on_user_error and step_event.event_type == ExecutionStepEventType.STEP_FAILURE:
-                step_event.reraise_user_error()
 
             yield step_event
 

@@ -35,6 +35,7 @@ class ExecutionContext(namedtuple('_ExecutionContext', 'loggers resources tags')
         )
 
 
+# TODO: remove loggers. This needs to be serializable
 class ExecutionMetadata(namedtuple('_ExecutionMetadata', 'run_id tags event_callback loggers')):
     def __new__(cls, run_id=None, tags=None, event_callback=None, loggers=None):
         return super(ExecutionMetadata, cls).__new__(
@@ -43,6 +44,14 @@ class ExecutionMetadata(namedtuple('_ExecutionMetadata', 'run_id tags event_call
             tags=check.opt_dict_param(tags, 'tags', key_type=str, value_type=str),
             event_callback=check.opt_callable_param(event_callback, 'event_callback'),
             loggers=check.opt_list_param(loggers, 'loggers'),
+        )
+
+    def with_tags(self, added_tags):
+        return ExecutionMetadata(
+            run_id=self.run_id,
+            tags=merge_dicts(self.tags, added_tags),
+            event_callback=self.event_callback,
+            loggers=self.loggers,
         )
 
 
@@ -198,7 +207,10 @@ class TransformExecutionContextMetadata(six.with_metaclass(ABCMeta)):  # pylint:
 class PipelineContextData(
     namedtuple(
         '_PipelineContextData',
-        'run_id resources environment_config persistence_strategy pipeline_def event_callback',
+        (
+            'run_id resources environment_config persistence_strategy pipeline_def event_callback '
+            'execution_metadata'
+        ),
     )
 ):
     '''
@@ -213,7 +225,8 @@ class PipelineContextData(
         environment_config,
         persistence_strategy,
         pipeline_def,
-        event_callback=None,
+        execution_metadata,
+        event_callback,
     ):
         from .definitions.pipeline import PipelineDefinition
 
@@ -227,6 +240,7 @@ class PipelineContextData(
             ),
             pipeline_def=check.inst_param(pipeline_def, 'pipeline_def', PipelineDefinition),
             event_callback=check.opt_callable_param(event_callback, 'event_callback'),
+            execution_metadata=execution_metadata,
         )
 
 
@@ -292,6 +306,10 @@ class PipelineExecutionContext(object):
 
     def has_event_callback(self):
         return self._pipeline_context_data.event_callback is not None
+
+    @property
+    def execution_metadata(self):
+        return self._pipeline_context_data.execution_metadata
 
     @property
     def log(self):
