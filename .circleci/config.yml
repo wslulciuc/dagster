@@ -690,6 +690,15 @@ jobs:
             cd js_modules/dagit
             yarn run check-prettier
 
+      - run:
+          command: |
+            mv js_modules/dagit/coverage/lcov.info js_modules/dagit/coverage/dagit.lcov.${CIRCLE_BUILD_NUM}.info
+
+      - persist_to_workspace:
+          root: js_modules/dagit/coverage
+          paths:
+            - dagit.lcov.*
+
   airline-demo-py36: &airline-demo-template
     <<: *dagster-template
     docker:
