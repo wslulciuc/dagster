@@ -692,7 +692,7 @@ jobs:
 
       - run:
           command: |
-            mv js_modules/dagit/coverage/lcov.info js_modules/dagit/coverage/dagit.lcov.${CIRCLE_BUILD_NUM}.info
+            mv js_modules/dagit/coverage/lcov.info js_modules/dagit/coverage/lcov.dagit.${CIRCLE_BUILD_NUM}.info
 
       - persist_to_workspace:
           root: js_modules/dagit/coverage
@@ -792,15 +792,19 @@ jobs:
       - run:
           name: Install Dependencies
           command: |
-            sudo pip install coverage coveralls
+            sudo apt-get -qq -y install lcov
+            sudo pip install coverage coveralls coveralls-merge
+            gem install coveralls-lcov
 
       - attach_workspace:
           at: /tmp/workspace
 
       - run: |
           cp /tmp/workspace/.coverage* .
+          cp /tmp/workspace/lcov* .
           coverage combine
-          coveralls
+          coveralls-lcov -v -n lcov.* > coverage.js.json
+          coveralls-merge coverage.js.json
 
   nightly:
     docker:
